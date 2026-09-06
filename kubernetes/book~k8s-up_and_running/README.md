@@ -6,6 +6,8 @@ This directory serves as my personal compendium, structured notes, and hands-on 
 
 ---
 
+The holy frail of Kubernetes: [https://kubernetes.io/docs/concepts/](https://kubernetes.io/docs/concepts/)
+
 ## 🗺️ Reorganized Table of Contents
 
 ### 1. ⚙️ [Fundamentals](01_fundamentals.md)
