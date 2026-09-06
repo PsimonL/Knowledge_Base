@@ -14,7 +14,7 @@ This directory serves as my personal compendium, structured notes, and hands-on 
 * **C03** -> Deploying a Kubernetes Cluster -> Overview of Control Plane components and Worker Node architecture.
 * **C04** -> Common kubectl Commands -> Essential CLI tool usage, basic commands, and imperative operations.
 
-### 2. 🧩 [Workloads](02_workloads.md)
+### 2. 🧩 [Workloads Core](02a_workloads_core.md) and [Workloads Controllers](02b_workloads_controllers.md)
 * **C05** -> Pods -> Deep dive into Pod anatomy, lifecycle, and configuring liveness/readiness probes.
 * **C06** -> Labels and Annotations -> Utilizing metadata for resource selection, filtering, and organizing workloads.
 * **C09** -> ReplicaSet -> Low-level replication mechanism running beneath Deployments to ensure pod count.
