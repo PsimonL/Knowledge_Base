@@ -1,0 +1,4 @@
+{
+    "docker_login": "docker_hub-login",
+    "docker_password": "docker_hub-password"
+}

@@ -1,0 +1,271 @@
+---
+- hosts: all
+  become: true
+  become_user: root
+  become_method: sudo
+  tasks:
+
+# Installing packages: docker-ce, docker-ce-cli, containerd.io and then adding a user named “vagrant” to the “docker” group.
+  - name: Install packages that allow apt to be used over HTTPS
+    apt:
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg-agent
+      - software-properties-common
+
+  - name: Add an apt signing key for Docker
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      state: present
+
+  - name: Add apt repository for stable version
+    apt_repository:
+      repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable
+      state: present
+
+  - name: Install docker and its dependecies
+    apt: 
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+      - docker-ce 
+      - docker-ce-cli 
+      - containerd.io # Container manager
+    notify:
+      - docker status
+
+  - name: Add vagrant user to docker group
+    user:
+      name: vagrant
+      group: docker
+
+# Kubelet will not start if the system has swap enabled, so we are disabling swap using the below code.
+  - name: Remove swapfile from /etc/fstab
+    mount:
+      name: "{{ item }}"
+      fstype: swap
+      state: absent
+    with_items:
+      - swap
+      - none
+
+  - name: Disable swap
+    command: swapoff -a
+    when: ansible_swaptotal_mb > 0      
+
+# Installing kubelet, kubeadm and kubectl for managing k8s cluster.
+  - name: Add an apt signing key for Kubernetes
+    apt_key:
+      url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+
+  - name: Adding apt repository for Kubernetes
+    apt_repository:
+      repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+      filename: kubernetes.list
+
+  - name: Install Kubernetes binaries
+    apt: 
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+        - kubelet 
+        - kubeadm 
+        - kubectl
+
+# Adding line with node IP to /etc/default/kubelet
+  - name: Configure IP of node
+    lineinfile:
+      create: yes
+      path: /etc/default/kubelet
+      line: KUBELET_EXTRA_ARGS=--node-ip={{ master_node_ip }}
+
+  - name: Ensure /etc/containerd directory exists
+    file:
+      path: /etc/containerd
+      state: directory
+
+  - name: Create docker group
+    group:
+      name: docker
+      state: present
+    become: yes
+
+  - name: Add user to the docker group
+    user:
+      name: vagrant
+      groups: docker
+      append: yes
+    become: yes
+
+  - name: Restart docker
+    service:
+      name: docker
+      daemon_reload: yes
+      state: restarted
+
+  - name: Restart kubelet
+    service:
+      name: kubelet
+      daemon_reload: yes
+      state: restarted
+      
+  - name: Generate and place default config
+    command: containerd config default
+    register: containerd_config_output
+  - name: Create Config file
+    copy:
+      content: "{{ containerd_config_output.stdout }}"
+      dest: /etc/containerd/config.toml
+
+# Restart Docker nad k8s
+  - name: Restart containerd
+    service:
+      name: containerd
+      daemon_reload: yes
+      state: restarted
+      
+  # Pull required containers for cluster ube-apiserver, kube-controller-manager, kube-scheduler, kube-proxy etc
+  - name: Pull Required Images
+    command: kubeadm config images pull
+
+  # Initialize cluster with kubeadm
+  - name: Initialize the Kubernetes cluster using kubeadm
+    command: kubeadm init --apiserver-advertise-address={{ master_node_ip }} --apiserver-cert-extra-sans={{ master_node_ip }} --node-name demo-k8s-controlplane --pod-network-cidr=192.168.0.0/16
+    ignore_errors: true
+
+  # Setup the kube config file for the vagrant user to access the Kubernetes cluster
+  - name: Setup kubeconfig for vagrant user
+    command: "{{ item }}"
+    with_items:
+     - mkdir -p /home/vagrant/.kube
+     - cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+     - chown vagrant:vagrant /home/vagrant/.kube/config
+
+  # Add Secret with DockerHub credentials and run pods at certain account
+  - name: Load DockerHub credentials
+    include_vars:
+      file: docker-credentials/creds.json
+  
+  - name: Login to Docker Hub
+    become_user: vagrant
+    command: sudo docker login --username {{ docker_login }} --password {{ docker_password }}
+
+  - name: Copy docker config file
+    become: yes
+    copy:
+      src: /root/.docker/config.json
+      dest: /home/vagrant/
+      remote_src: yes
+    register: config_coppied
+
+  - name: Change owner and group of the copied file
+    become: yes
+    file:
+      path: /home/vagrant/config.json
+      owner: vagrant
+      group: vagrant
+    when: config_coppied.changed
+
+  - name: Create k8s secret with Docker Hub credentials - remember to add at the end of tiger-operator.yaml
+    become_user: vagrant
+    command: kubectl create secret docker-registry docker-hub-login --from-file=.dockerconfigjson=/home/vagrant/config.json 
+    # --namespace=<TODO-desired-namespace>
+    
+  # ==========================================================================================================================================
+  # Setup the container networking provider and the network policy engine using calico template - MANIFEST.
+  # - name: Install calico pod network
+  #   become: false
+  #   command: kubectl apply -f https://docs.projectcalico.org/v3.4/getting-started/kubernetes/installation/hosted/calico.yaml    
+  #   when: installcalico is defined
+  # ==========================================================================================================================================
+  # Setup the container networking provider and the network policy engine using calico template - OPERATOR.
+  - name: Create tigera operator
+    become: true
+    become_user: vagrant
+    command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/tigera-operator.yaml
+
+  - name: Create custom resources
+    become: true
+    become_user: vagrant
+    command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/custom-resources.yaml
+
+  - name: Remove Taints from Control Plane Nodes
+    become: true
+    become_user: vagrant
+    command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+
+
+  # Generate kube join command for joining the node to the Kubernetes cluster and store the command in the file named join-command.
+  - name: Generate join command
+    command: kubeadm token create --print-join-command
+    register: join_command
+
+  # Check status of saved command
+  - debug:
+      msg: "{{ join_command }}"
+
+  - name: Copy join command to local file
+    become: no # Very important stuff!!!
+    local_action: copy content="{{ join_command.stdout_lines[0] }}" dest="./join-command"
+
+  # Adding the HashiCorp GPG key to the system, which is used for package signature verification.
+  - name: Add HashiCorp GPG key
+    become: yes
+    ansible.builtin.apt_key:
+      url: https://apt.releases.hashicorp.com/gpg
+      state: present
+      validate_certs: yes
+      keyring: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+  # Adding the HashiCorp APT repository to the system.
+  - name: Add HashiCorp APT repository
+    become: yes
+    ansible.builtin.apt_repository:
+      repo: "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+      state: present
+      filename: hashicorp
+      update_cache: yes
+
+  # Installing the "Terraform" package using the apt-get package manager.
+  - name: Install Terraform
+    become: yes
+    ansible.builtin.apt:
+      name: terraform
+      state: latest
+  
+  # Create folder /home/vagrant/setup
+  - name: Create /home/vagrant/setup directory
+    file:
+      path: /home/vagrant/setup
+      state: directory
+
+  # Copy files from synced folder to user folder, cause synced folder change will also delete stuff at host
+  - name: Copy contents from /vagrant to /home/vagrant/setup
+    copy:
+      src: /vagrant/
+      dest: /home/vagrant/setup/
+
+# Setup a handler for checking Docker daemon.
+  handlers:
+    - name: docker status
+      service: name=docker state=started
+
+
+
+  # TODO: nie mozna tu dać tego taska bo worker jeszcze nie istnieje
+  # - name: Rename worker nodes names
+  #   # become: true
+  #   become_user: vagrant
+  #   command: kubectl label nodes {{ worker_node_name }} roles=worker 
