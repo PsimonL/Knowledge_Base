@@ -220,11 +220,13 @@ spec:
 Kubernetes lets you define [probes](https://kubernetes.io/docs/concepts/workloads/pods/probes/) to continuously monitor the health of containers in a Pod. A probe is a diagnostic performed periodically by the kubelet on a container. To perform a diagnostic, the kubelet either executes code within the container or makes a network request.
 
 #### Types of probes:
-| Probe Type | What it checks | Action on Failure | Typical Real-World Use Case |
-| :--- | :--- | :--- | :--- |
-| **Startup Probe** | Checks if the application inside the container has successfully started up. | **Restarts the container**. | Used for legacy or slow-starting apps that take a long time to load caches or initialize database connections. |
-| **Liveness Probe** | Checks if the application is still running and hasn't frozen or deadlocked. | **Restarts the container**. | Catching a Java/Python app that is still running as a process but is stuck in a deadlock and cannot process threads. |
-| **Readiness Probe** | Determines when a container is ready to accept traffic. | **Removes the Pod from Service endpoints** (stops sending traffic). | Temporarily stopping traffic to a backend app while it recalculates a heavy background task or reloads configuration. |
+
+| Probe Type | What it checks? (Exactly) | Will it RESTARTS the container? | Action on Failure | Typical Real-World Use Case |
+| :--- | :--- | :--- | :--- | :--- |
+| **Startup Probe** | Whether the application has finished its initialization and boot process. | **YES** | Kubelet kills and restarts the container. It also blocks Liveness/Readiness from running until it passes. | Used for slow-starting apps (e.g., Spring Boot) that take a long time to load caches or run database migrations on boot. |
+| **Liveness Probe** | Whether the application is still running and hasn't frozen or crashed during daily operations. | **YES** | Kubelet immediately kills and restarts the container (hard reset of the process). | Catching a Java/Python app that is still running as a PID process but is stuck in a deadlock and cannot process new threads. |
+| **Readiness Probe** | Whether the application is currently capable of handling incoming user traffic. | **NO RESTARTS** | Kubelet removes the Pod's IP from Service endpoints. The container keeps running, but receives zero traffic. | Temporarily stopping traffic to a backend app while it recalculates a heavy background task, reloads local config, or when the DB goes down. |
+
 
 Example config:
 ```yaml
@@ -267,6 +269,84 @@ spec:
 - **Success** -> The container passed the diagnostic.
 - **Failure** -> The container failed the diagnostic. For *liveness and startup probes*, the kubelet kills the container, and the container is subjected to its restart policy. For *readiness probes*, the kubelet marks the container as not ready, and the Pod stops receiving traffic from matching Services.
 - **Unknown** -> The diagnostic failed (no action should be taken, and the kubelet will make further checks).
+
+### Resource Limmiting
+[Resource limiting](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) ensures that containers do not starve each other of resources and that the cluster remains stable. This is mostly **cpu** and **memory**, thus there are other types of resource limits like ephemeral-storage or hugepages-<size> (Linux only).
+
+#### Requests and Limits
+When you specify the resource request for containers in a Pod, the kube-scheduler uses this information to decide which node to place the Pod on.
+
+When you specify a resource `limit` for a container, the kubelet enforces those limits so that the running container is not allowed to use more of that resource than the limit you set. The kubelet also reserves at least the `request` amount of that system resource specifically for that container to use.
+Kubernetes allows to manage compute resources (**cpu** and **memory**) for containers in a Pod; there are others. 
+
+If the node where a Pod is running has **enough of a resource available**, it's possible (and allowed) for a container **to use more resource** than its request for that resource specifies.
+
+For example, if you set a memory `request` of 256 MiB for a container, and that container is in a Pod scheduled to a Node with 8GiB of memory and no other Pods, then the container can try to use more RAM. 256 MiB value is basically **a bare minimum** that Pod will be provisioned with.
+
+`Limits` are a different story. Both cpu and memory `limits` are applied by the kubelet (and container runtime), and are ultimately enforced by the kernel. On Linux nodes, the Linux kernel enforces limits with `cgroups`. The behavior of cpu and memory limit enforcement is slightly different:
+- `cpu limits` are enforced by `CPU throttling`. When a container approaches its cpu limit, the kernel will restrict access to the CPU corresponding to the container's limit. Thus, a cpu limit is a hard limit the kernel enforces.
+- `memory limits` are enforced by the kernel with `out of memory (OOM) kills`. When a container uses more than its memory limit, the kernel may terminate it. However, terminations only happen **when the kernel detects memory pressure**. Thus, a container that over allocates memory **may not be immediately killed**. This means memory limits are enforced reactively.
+
+#### Example
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-resource-limited
+  labels:
+    app: my-app
+spec:
+  containers:
+  - name: web-app
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 80
+    # RESOURCE MANAGEMENT SECTION
+    resources:
+      requests:
+        memory: "64Mi"        # Guaranteed baseline: 64 Megabytes of RAM reserved for this container
+        cpu: "250m"           # Guaranteed baseline: 0.25 of a CPU core (250 milli-cores)
+      limits:
+        memory: "128Mi"       # Ceiling: Exceeding 128Mi RAM triggers an instant OOMKilled termination
+        cpu: "500m"           # Ceiling: Exceeding 0.5 CPU core triggers proactive CPU throttling (slowdown)
+```
+
+### Static Volumes
+[Volumes](https://kubernetes.io/docs/concepts/storage/volumes/) provide a way for containers in a Pod to access and share data via the filesystem. To use a volume, you must define it at the Pod level (`.spec.volumes`) and then mount it into specific containers using the `.spec.containers[*].volumeMounts` field.
+
+A `volumeMount` acts as a mount point inside the container. It maps a specific directory within the container's filesystem (`mountPath`) to the storage resource declared under a matching name in the Pod's configuration.
+
+#### Common volume types defined in Pod specs:
+There are multiple types of volumes in Kubernetes, such as:
+- `emptyDir` -> Creates a transient, initially empty directory bound strictly to the Pod's lifecycle. While data is permanently **deleted when the Pod is removed** from a node, it safely survives container crashes and restarts. It can also be backed by the host's raw storage or a fast, RAM-driven filesystem (`tmpfs`).
+- `hostPath` -> Mounts an existing file or directory from the host Node's physical filesystem directly into the container. The data **persists on the node even after the Pod is deleted**; however, it introduces severe security vulnerabilities if untrusted workloads are allowed to modify host paths without restriction (e.g., omitting `readOnly: true`).
+
+Additionally, Kubernetes utilizes `configMap`, `secret`, and `persistentVolumeClaim (PVC)` volume sources. However, their exact mechanics and configurations will be covered in detail in the upcoming [03_configmaps_and_secrets.md](03_configmaps_and_secrets.md) chapter.
+
+#### Example
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-with-volumes
+  labels:
+    app: my-app
+spec:
+  # 1. VOLUMES: Declares storage resources available within this Pod
+  volumes:
+  - name: cache-volume         # Unique identifier for this volume instance
+    emptyDir: {}               # Ephemeral directory wiped upon Pod deletion
+  containers:
+  - name: web-app
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 80
+    # 2. VOLUME MOUNTS: Defines where to inject the declared volume
+    volumeMounts:
+    - name: cache-volume       # Must match the unique volume name below
+      mountPath: /var/cache/nginx # Directory path inside the container
+```
+> NOTE: It is a very common practice to mount an `emptyDir` volume to /var/cache/nginx provides high-performance temporary storage for Nginx's runtime cache and transient files. It isolates intensive disk write operations from the container's slower writable layer and allows Nginx to start safely even when running inside a highly secure, read-only filesystem environment.
 
 ## 2. Namespaces, Labels, Selectors and Annotations
 
@@ -386,7 +466,7 @@ kubectl get pods -n production -l app=secure-backend,tier=backend
 kubectl get pods -n production --show-labels
 ```
 
-## 3. Replicaset
+## 3. ReplicasSet
 [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/) maintains a stable set of replica Pods running at any given time. Usually, you define a Deployment and let that Deployment manage ReplicaSets automatically.
 
 ### How does it work?
