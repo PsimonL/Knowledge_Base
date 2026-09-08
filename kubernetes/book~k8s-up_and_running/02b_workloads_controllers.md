@@ -189,12 +189,117 @@ spec:
 
 ## 3. Job and Cronjob
 
+### Job
+A [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/) creates one or more Pods and ensures that a specified number of them successfully terminate. Unlike a Deployment (which runs continuously), a Job is meant for tasks that run until completion. When a specified number of successful completions is reached, the task is completed. Deleting a Job will clean up the Pods it created. Suspending a Job will delete its active Pods until the Job is resumed again.
+> NOTE: You can also use a Job to run multiple Pods in parallel.
+
+#### Key fields in the `spec` template:
+- `completions`: The **total** number of Pods that must finish successfully for the Job to be marked as complete.
+- `parallelism`: The maximum number of Pods allowed to run **simultaneously** at any given time.
+- `backoffLimit`: Number of retries before marking the Job as failed (default: 6).
+- `activeDeadlineSeconds`: A hard duration limit (in seconds). If exceeded, K8s terminates all active Pods and fails the Job.
+> NOTE: The deafult `restartPolicy` is always set to `Always` value. For **Job** it's **strictly forbidden** and will cause a validation error. You must explicitly set it to: `OnFailure` or `Never`. 
+
+#### Completion Modes (`.spec.completionMode`)
+Jobs can operate in two different completion modes:
+- **`NonIndexed` (Default):** All Pods are identical and interchangeable. The Job is complete as soon as any `.spec.completions` number of Pods succeed.
+- **`Indexed`:** Each Pod gets a unique, static index from `0` to `.spec.completions-1` (available in the Pod via the `JOB_COMPLETION_INDEX` environment variable or hostname as `$(job-name)-$(index)`). The Job is only complete when there is **at least one successful Pod for every single index**.
+
+#### Pod Replacement Policy (`.spec.podReplacementPolicy`)
+By default, if a Pod fails or is in a *Terminating* state (e.g., node eviction), the Job controller instantly creates a replacement Pod. This can cause the number of concurrent running Pods to briefly exceed `.spec.parallelism` limit for a short moment of time.
+- If you have strict resource constraints, you can set `podReplacementPolicy: Failed`. This tells K8s to wait until the old Pod is **completely dead** (`Failed` phase) before spawning a new one.
+
+#### Automatic Cleanup / TTL (`.spec.ttlSecondsAfterFinished`)
+Completed or failed Jobs stay in the cluster forever for log inspection. To prevent API server clutter and avoid orphaned pods, use the TTL mechanism:
+- **`ttlSecondsAfterFinished: 100`**: Automatically and cascadingly deletes the Job and all its leftover Pods exactly 100 seconds after completion.
+- Setting this to `0` triggers immediate deletion after the Job finishes.
+
 ### Job Yaml example:
 ```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi-job
+spec:
+  template:
+    spec:
+      containers:
+      - name: pi
+        image: perl:5.34.0
+        command: ["perl",  "-Mbignum=bpi", "-wle", "print bpi(2000)"]
+      restartPolicy: Never
+  backoffLimit: 4
+```
+
+### CronJob
+A [CronJob](https://kubernetes.io) manages time-based **Jobs**, running them periodically on a given schedule (written in standard Linux Cron format). One CronJob object acts like a single line of a `crontab` file. 
+
+> NOTE: A CronJob does NOT create or manage Pods directly. It acts as a controller that triggers and monitors **Job** objects, which in turn manage the underlying Pods.
+
+
+#### Key fields in the `spec` template:
+- `schedule`: The cron schedule string (e.g., `"*/5 * * * *"` for every 5 minutes) that drives the execution.
+- `concurrencyPolicy`: Specifies how to handle overlapping executions if a new Job is triggered while the previous Job is still running:
+  - `Allow` (Default): Runs concurrent Jobs simultaneously.
+  * `Forbid`: Skips the new execution entirely if the previous one hasn't finished yet.
+  * `Replace`: Cancels/deletes the currently running Job and spawns a brand-new one.
+- `startingDeadlineSeconds`: The maximum allowed delay (in seconds) for starting a missed Job (e.g., due to cluster resource limits or controller downtime). If the delay exceeds this value, the execution is skipped for that cycle.
+- `successfulJobsHistoryLimit`: The number of successful completed Jobs to keep in the cluster history for debugging (default: 3).
+- `failedJobsHistoryLimit`: The number of failed Jobs to keep in the cluster history for debugging (default: 1).
+
+> NOTE: Unlike standalone Jobs which stay in the cluster forever, CronJobs automatically clean up their oldest execution history once the `successfulJobsHistoryLimit` or `failedJobsHistoryLimit` is breached.
+
+#### CronJob schedule syntax
+```
+# ┌───────────── minute (0 - 59)
+# │ ┌───────────── hour (0 - 23)
+# │ │ ┌───────────── day of the month (1 - 31)
+# │ │ │ ┌───────────── month (1 - 12)
+# │ │ │ │ ┌───────────── day of the week (0 - 6) (Sunday to Saturday)
+# │ │ │ │ │                                   OR sun, mon, tue, wed, thu, fri, sat
+# │ │ │ │ │
+# │ │ │ │ │
+# * * * * *
 ```
 
 ### CronJob Yaml example:
 ```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: echo-cronjob
+spec: 
+  # ==========================================================================
+  # LEVEL 1: CronJob Spec (.spec)
+  # Controls: WHEN and HOW OFTEN the task triggers + how history is managed.
+  # ==========================================================================
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      # ==========================================================================
+      # LEVEL 2: Job Spec (.spec.jobTemplate.spec)
+      # Controls: WHAT CONSTITUTES A SUCCESSFUL TASK (completions, retries).
+      # ==========================================================================
+      completions: 1
+      parallelism: 1
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          # ==========================================================================
+          # LEVEL 3: Pod Spec (.spec.jobTemplate.spec.template.spec)
+          # Controls: THE ACTUAL CONTAINER EXECUTION (images, commands, volumes).
+          # ==========================================================================
+          containers:
+          - name: worker
+            image: busybox
+            command: ["sh", "-c", "echo 'Running scheduled task...'; sleep 5"]
+          # MANDATORY: Must be set to Never or OnFailure (validation error if omitted/Always)
+          restartPolicy: OnFailure
 ```
 
 ## 4. Singleton
