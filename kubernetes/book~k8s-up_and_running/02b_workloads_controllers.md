@@ -303,15 +303,142 @@ spec:
 ```
 
 ## 4. Singleton
+The Singleton is not a native Kubernetes object, it's rather a type of  an architectural deployment design pattern. Typically implemented via a Deployment with replicas: 1 or a StatefulSet with 1 replica used for non-distributed legacy applications or single-instance stateful services.
+A single Pod instance is bound to a cloud persistent block storage volume (a PersistentVolume using ReadWriteOnce access mode).
+
+- High Availability without Replication: If the underlying Node crashes, the Kubernetes Control Plane reschedules the single Pod onto a healthy Node and re-attaches the exact same network persistent volume, maintaining data integrity.
+
+- Trade-off: Lack of horizontal scaling and brief downtime during Pod migration between nodes.
 
 ### Yaml example:
 ```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-mysql-singleton
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate      # Prevents multi-attach errors on RWO volume during updates
+  selector:
+    matchLabels:
+      app: mysql-db
+  template:
+    metadata:
+      labels:
+        app: mysql-db
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pvc
 ```
 
+### Architectural Limitations & Workaround Context
+
+This pattern is a popular, simplified workaround suitable **only for specific, simple scenarios** (such as legacy monolithic applications). While using a Deployment with a `Recreate` strategy solves one critical infrastructure roadblock, **it is not a full replacement for a StatefulSet.**
+
+#### What specific problem does this pattern solve?
+It prevents **Multi-Attach errors** during application updates. 
+Under the default `RollingUpdate` strategy, Kubernetes attempts to spin up a new Pod before killing the old one. If your volume uses `ReadWriteOnce` (RWO) access mode, the cloud provider will block the new Pod from starting because the old Pod is still holding the disk lock. By forcing `strategy: type: Recreate`, Kubernetes guarantees it will **completely terminate the old Pod and detach the volume first**, before creating the new Pod and mounting the storage.
+
+#### What features of a StatefulSet does this pattern fail to replace?
+- **No Horizontal Scaling (e.g., Read Replicas):** If you scale a standard Deployment beyond `replicas: 1`, every new Pod will attempt to mount the exact same `mysql-pvc` claim, causing immediate multi-attach failures. A StatefulSet bypasses this limitation entirely through `volumeClaimTemplates`, which automatically provision a unique, independent Persistent Volume (PV) for each individual Pod instance.
+- **No Stable Network Identity or DNS:** In a Deployment, Pods are ephemeral and interchangeable. Every time the Pod restarts or migrates to a different node, its name changes completely (e.g., from `legacy-mysql-singleton-abc12` to `legacy-mysql-singleton-xyz98`). A StatefulSet guarantees strict, predictable naming (e.g., `mysql-0`) linked to a Headless Service, providing stable DNS records that remain unchanged across the Pod's lifecycle.
+- **Random Startup and Shutdown Order:** Deployments manage Pods concurrently and randomly. They completely lack the ordered, deterministic execution found in a StatefulSet, which enforces sequential operations (e.g., launching `pod-0`, waiting for it to be `Ready`, then launching `pod-1`). This strict ordering is mathematically necessary for clustering, bootstrapping, and data synchronization in distributed stateful systems.
+
 ## 5. StatefulSet
+[StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/) is the specialized workload controller designed for distributed, clustered stateful applications (e.g., PostgreSQL, Kafka, MongoDB, Elasticsearch, Cassandra) where Pods require persistent network identities and individual storage. 
+
+### Characteristics
+- **Stable Network Identity**: Pods receive predictable, zero-indexed ordinal names (db-0, db-1, db-2) instead of random hashes.
+- **Dedicated Storage (volumeClaimTemplates)**: Dynamically provisions an independent PersistentVolumeClaim (PVC) for each Pod replica. If db-1 fails, its replacement Pod automatically re-attaches to the exact volume dedicated to db-1.
+- **Ordered Execution**: Operations (creation, updates, scaling, deletion) occur sequentially (0 to N-1). Kubernetes waits for db-0 to pass its Readiness Probe before spawning db-1, protecting leader election mechanisms and preventing split-brain scenarios.
+- **Headless Service**: StatefulSets require a companion Headless Service (clusterIP: None) to create direct DNS A-records for individual Pods (e.g., db-0.db-service.default.svc.cluster.local) for peer discovery.
+
+### **Update Strategies (`spec.updateStrategy.type`)**:
+- `RollingUpdate`: The default behavior. Pods are deleted and recreated in reverse ordinal order (from `N-1` down to `0`). Kubernetes waits for each Pod to become `Ready` before moving to the next.
+- `OnDelete`: The controller will not automatically update Pods when the `.spec.template` is modified. You must manually delete individual Pods to trigger the update on them.
+
+### **Partitioning (`spec.updateStrategy.rollingUpdate.partition`)**:
+- If a partition is specified, all Pods with an ordinal greater than or equal to the partition value will be updated when the template changes. All Pods with a smaller ordinal will remain untouched (useful for Canary deployments).
+
+### **Pod Management Policy (`spec.podManagementPolicy`)**:
+- `OrderedReady`: The default behavior. Pods are created sequentially (0 to N-1) and deleted in reverse order.
+- `Parallel`: Pods are launched or terminated concurrently without waiting for previous ones, reducing scaling time while still maintaining unique identities and dedicated PVCs.
+
+### **PVC Retention Policy (`spec.persistentVolumeClaimRetentionPolicy`)**:
+- Controls whether PVCs are deleted or retained during the lifecycle of the StatefulSet.
+- `whenDeleted`: Configures what happens to PVCs when the entire StatefulSet is deleted (`Retain` or `Delete`).
+- `whenScaled`: Configures what happens to PVCs when the number of replicas is reduced (`Retain` or `Delete`).
+
 
 ### Yaml example:
 ```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  labels:
+    app: redis
+spec:
+  ports:
+  - port: 6379
+    name: redis
+  clusterIP: None # Key setting that defines this as a Headless Service
+  selector:
+    app: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+spec:
+  serviceName: "redis-headless"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.0-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        # Health probes ensure the correctness of Ordered Execution guarantees
+        readinessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 10Gi
 ```
 
 ## 6. Deployment Strategies
