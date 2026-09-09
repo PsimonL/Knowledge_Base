@@ -441,4 +441,135 @@ spec:
           storage: 10Gi
 ```
 
+
 ## 6. Deployment Strategies
+Choosing the right **deployment strategy** depends on your system's availability requirements, budget constraints, and risk tolerance. Each strategy offers a different approach to upgrading your application, with varying impacts on end-users and infrastructure.
+
+### Strategy Overviews
+- **Rolling Update**
+  - **Description**: New versions of the application (V2) are deployed gradually, replacing old instances (V1) one by one or in small batches.
+  - **Pros**: No system downtime, low additional infrastructure resource requirements.
+  - **Cons**: Two different versions of the application run simultaneously during deployment, which requires careful backward compatibility planning (e.g., database schemas).
+
+- **Recreate**
+  - **Description**: All existing instances of the old version (V1) are completely shut down before the new version (V2) instances are spun up.
+  - **Pros**: Simple setup, zero risk of version mismatch or API compatibility issues during deployment.
+  - **Cons**: Causes complete system downtime while the new version is booting up.
+
+- **Blue-Green**
+  - **Description**: Two identical production environments are maintained: "Blue" (active, V1) and "Green" (new, V2). Once the Green environment passes final testing, a router instantly switches all user traffic to it.
+  - **Pros**: Zero downtime, instant rollback capability by simply routing traffic back to the Blue environment.
+  - **Cons**: Expensive, as it requires doubling your infrastructure resources.
+
+- **Canary**
+  - **Description**: The new version (V2) is rolled out to a small, isolated subset of users (e.g., 5%). If no errors are detected, traffic to the new version is incrementally increased to 100%.
+  - **Pros**: Highly secure testing against live production traffic, isolating the impact of potential bugs.
+  - **Cons**: Complex to configure, requiring advanced traffic routing and deep application monitoring.
+
+- **Shadow (Mirroring)**
+  - **Description**: Production traffic is cloned (forked) and sent to both the old (V1) and new (V2) versions simultaneously. Responses from the V2 instances are discarded and never reach the users.
+  - **Pros**: Allows for thorough performance, load, and bug testing under real production traffic with zero impact on users.
+  - **Cons**: Highly complex and costly to implement; introduces risks of side effects (e.g., duplicate database writes or duplicate third-party API calls) unless properly sandboxed.
+
+### Yaml example deployment strategy configs:
+```yaml
+# ==========================================
+# 1. ROLLING UPDATE (Native Kubernetes)
+# ==========================================
+kind: Deployment
+metadata:
+  name: my-app-rolling
+  labels:
+    app: my-app
+spec:
+  replicas: 3
+  # STRATEGY: RollingUpdate
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          
+      maxUnavailable: 0
+...
+
+# ==========================================
+# 2. RECREATE (Native Kubernetes)
+# ==========================================
+kind: Deployment
+metadata:
+  name: my-app-recreate
+  labels:
+    app: my-app
+spec:
+  replicas: 3
+  # STRATEGY: Recreate
+  strategy:
+    type: Recreate
+...
+
+# ==========================================
+# 3. BLUE-GREEN (Via Argo Rollouts)
+# ==========================================
+kind: Rollout
+metadata:
+  name: my-app-bluegreen
+  labels:
+    app: my-app
+spec:
+  replicas: 3
+  # STRATEGY: BlueGreen
+  strategy:
+    blueGreen:
+      activeService: my-app-active    
+      previewService: my-app-preview  
+      autoPromotionEnabled: false     
+...
+
+# ==========================================
+# 4. CANARY (Via Argo Rollouts)
+# ==========================================
+kind: Rollout
+metadata:
+  name: my-app-canary
+  labels:
+    app: my-app
+spec:
+  replicas: 3
+  # STRATEGY: Canary
+  strategy:
+    canary:
+      steps:
+      - setWeight: 10
+      - pause: { duration: 10m }
+      - setWeight: 50
+      - pause: {} # Manual promotion needed
+      - setWeight: 100
+...
+
+# ==========================================
+# 5. SHADOW (Via Argo Rollouts + Istio/Service Mesh)
+# ==========================================
+kind: Rollout
+metadata:
+  name: my-app-shadow
+  labels:
+    app: my-app
+spec:
+  replicas: 3
+  # STRATEGY: Shadow (Mirroring)
+  strategy:
+    canary:
+      # Shadow deployment relies on your traffic management layer (e.g., Istio)
+      # setting the traffic route weight to 0% for actual users, while 
+      # mirroring 100% of production traffic to the new version.
+      trafficRouting:
+        istio:
+          virtualService:
+            name: my-app-vservice
+      steps:
+      - setWeight: 0
+        # Below configuration instructs the mesh to duplicate traffic
+        mirror:
+          percentage: 100
+      - pause: { duration: 1h }
+...
+```
