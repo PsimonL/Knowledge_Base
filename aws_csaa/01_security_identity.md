@@ -99,10 +99,3 @@ Prevents the **Confused Deputy** problem (third-party access).
 | Format | **CSV** download | Console UI / API |
 | Shows | Password age, MFA status, access keys, last rotation | **Last accessed time per service** |
 | Use case | Compliance audit, find old/unused keys | **Least privilege**, remove unused permissions |
-
-### Exam Tips
-- Need temporary credentials → **STS / roles**, not IAM users.
-- EC2 needs AWS access → **instance role**, never access keys on the instance.
-- Third-party access to your account → **cross-account role + External ID**.
-- Find unused permissions → **Access Advisor**. Audit credentials → **Credentials Report**.
-- Restrict even root in member accounts → **SCP**.

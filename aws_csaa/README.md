@@ -16,13 +16,18 @@ The purpose of this repository is to serve as a high-yield, structured knowledge
 ## Notes Folder Structure
 
 ```text
-aws_csaa/
-├── README.md                     # Main roadmap, study timeline, and global keyword cheat sheet
-├── 01_secure_arch.md             # IAM, SCP, KMS, Secrets Manager, VPC (SG/NACL/Endpoints), Transit Gateway, WAF, Shield, GuardDuty, Macie, CloudTrail, RAM
-├── 02_resilient_arch.md          # ELB, ASG, SQS, SNS, Route 53, Global Accelerator, RDS (Multi-AZ), Aurora, Kinesis, EventBridge, Storage Gateway, DR
-├── 03_high_perform_arch.md       # EC2, EBS, EFS, FSx, CloudFront, ElastiCache, DAX, Lambda, DynamoDB, Redshift, Athena, DataSync, Transfer Family, AI/ML
-└── 04_cost_optimized_arch.md     # S3 (Lifecycle/Glacier/Intelligent-Tiering), Spot/Reserved Inst., Savings Plans, Cost Explorer, Budgets, Organizations  
+aws_saa/
+├── README.md                   # Repository overview, study resources, and module breakdown
+├── 01_security_identity.md     # IAM, KMS, Secrets Manager, WAF, Shield, GuardDuty, Macie, CloudTrail, Organizations/SCP
+├── 02_compute.md               # EC2 (Instances, Placement Groups, Purchase Options), ELB, ASG, Lambda, ECS/EKS/Fargate
+├── 03_storage.md               # EBS, EFS, FSx, Instance Store, AMI, S3 (Classes, Lifecycle, CRR), Storage Gateway, DataSync
+├── 04_databases.md             # RDS (Multi-AZ, Proxy, Custom), Aurora (Quorum, Serverless, Global DB), DynamoDB, ElastiCache, DAX, Redshift
+├── 05_networking_delivery.md   # VPC (SG/NACL/Endpoints), Peering, Transit Gateway, Route 53, CloudFront, Global Accelerator
+├── 06_integration_analytics.md # SQS, SNS, Kinesis, EventBridge, Amazon MQ, Athena, Glue, EMR, AI/ML (SageMaker/Bedrock)
+└── 07_cheatsheet.md            # Exam Tips by scenario + "X vs. Y" comparison tables + DR strategies & Cost Optimization
 ```
+
+---
 
 Below is the architectural breakdown of this repository. Each file targets a specific core pillar of the AWS ecosystem. Use these files to map real-world scenarios directly to the correct AWS services.
 
@@ -31,46 +36,53 @@ Below is the architectural breakdown of this repository. Each file targets a spe
 This folder contains my personal study notes, architectural patterns, and cheat sheets prepared for the **AWS Certified Solutions Architect - Associate** exam. The notes are structured according to the official AWS Exam Guide domains, focusing on scenario-based problem-solving and architectural best practices.
 
 ## Folder Structure & Scope
-The study material is divided into 4 core architectural domains as defined by AWS:
 
-*   **`01_secure_arch.md` — Design Secure Architectures (30% of exam)**
-    *   Identity and Access Management (IAM) policies, roles, and security best practices.
-    *   Data protection, encryption at rest/in transit using AWS KMS and Secrets Manager.
-    *   Network isolation, VPC security (Security Groups, NACLs, VPC Endpoints).
-    *   Advanced networking: **VPC Peering**, **AWS Transit Gateway** (centralized routing), and **AWS RAM** (resource sharing).
-    *   Infrastructure protection using AWS WAF, Shield, GuardDuty, and AWS Config.
-    *   Governance, multi-account strategy with AWS Organizations, **Service Control Policies (SCPs)**, and CloudTrail auditing.
+*   **`01_security_identity.md` — Security, Identity & Governance**
+    *   **IAM:** Users, Groups, Roles, Instance Profiles, Policy evaluation logic, Cross-Account access, and IAM Database Authentication.
+    *   **Encryption & Secrets:** AWS KMS (CMKs, key rotation, envelope encryption), AWS Secrets Manager (auto-rotation), and Parameter Store.
+    *   **Perimeter & Threat Detection:** AWS WAF, AWS Shield (Standard/Advanced), GuardDuty, Inspector, Macie, and AWS Certificate Manager (ACM).
+    *   **Multi-Account & Auditing:** AWS Organizations, **Service Control Policies (SCPs)**, AWS RAM, CloudTrail, and AWS Config.
 
-*   **`02_resilient_arch.md` — Design Resilient Architectures (26% of exam)**
-    *   High Availability (HA) and Scalability using Elastic Load Balancing (ELB) and Auto Scaling Groups (ASG).
-    *   Decoupling application layers with messaging services (SQS, SNS, Amazon MQ).
-    *   Event-driven architectures using Amazon Kinesis and AWS Lambda.
-    *   Highly available data tiers (RDS Multi-AZ, Aurora Read Replicas, DynamoDB global tables).
-    *   Hybrid integration & backup: **AWS Storage Gateway** (File/Volume/Tape) and **AWS Backup**.
-    *   Global traffic routing, DNS strategies using Amazon Route 53, and **AWS Global Accelerator** (non-HTTP/Anycast IP).
-    *   Disaster Recovery (DR) strategies: Backup & Restore, Pilot Light, Warm Standby, Multi-Site (+ **S3 CRR/SRR**).
+*   **`02_compute.md` — Compute, Containers & Serverless**
+    *   **Amazon EC2:** Instance families, Placement Groups (Cluster, Spread, Partition), User Data, Metadata (IMDSv2), and ENIs.
+    *   **EC2 Purchase Options:** On-Demand, Spot Instances, Reserved Instances (Standard/Convertible), Savings Plans, and Dedicated Hosts/Instances.
+    *   **Scaling & Load Balancing:** Elastic Load Balancing (**ALB, NLB, GWLB**), Target Groups, SSL offloading, and Auto Scaling Groups (ASG policies).
+    *   **Serverless & Containers:** AWS Lambda (concurrency, VPC networking, execution limits), Amazon ECS, EKS, and **AWS Fargate**.
 
-*   **`03_high_perform_arch.md` — Design High-Performing Architectures (24% of exam)**
-    *   Compute optimization (EC2 instance types, placement groups, AWS Fargate, ECS/EKS).
-    *   High-performance storage solutions (EBS IOPS optimization, EFS, **Amazon FSx for Lustre/Windows**, Instance Store).
-    *   Global content delivery and caching using Amazon CloudFront and ElastiCache.
-    *   Database acceleration: **DynamoDB DAX** (microsecond caching).
-    *   Data migration & analytics: **AWS DataSync**, **AWS Transfer Family**, Amazon Redshift, Athena, Glue, EMR.
-    *   Artificial Intelligence and Machine Learning integration (Amazon SageMaker, Amazon Bedrock).
+*   **`03_storage.md` — Block, File, Object & Hybrid Storage**
+    *   **Instance-Level Storage:** EBS (gp3, io2, st1, sc1, snapshots, encryption), EC2 Instance Store (ephemeral), and AMIs.
+    *   **Shared File Systems:** Amazon EFS (POSIX, performance/throughput modes) and **Amazon FSx** (Windows File Server, Lustre, NetApp ONTAP, OpenZFS).
+    *   **Amazon S3:** Storage Classes (Standard, IA, Intelligent-Tiering, Glacier tiers), Lifecycle rules, Versioning, MFA Delete, CRR/SRR, Presigned URLs, and Encryption (SSE-S3/KMS/C).
+    *   **Hybrid & Migration:** **AWS Storage Gateway** (File, Volume, Tape), AWS DataSync, Snow Family, and AWS Transfer Family.
 
-*   **`04_cost_optimized_arch.md` — Design Cost-Optimized Architectures (20% of exam)**
-    *   Compute cost optimization (Spot Instances vs. Reserved Instances vs. Savings Plans).
-    *   Storage tiering lifecycle policies (S3 Standard, Infrequent Access, **S3 Intelligent-Tiering**, Glacier Instant/Flexible/Deep Archive).
-    *   Network data transfer charge mitigation and cost-effective routing.
-    *   Serverless vs. Provisioned resource allocation strategies (e.g., Aurora Serverless).
-    *   Cost management tools (AWS Budgets, Cost Explorer, AWS Compute Optimizer).
+*   **`04_databases.md` — Relational, NoSQL & In-Memory Caching**
+    *   **Amazon RDS:** Multi-AZ (HA) vs. Read Replicas (scaling), Automated Backups vs. Manual Snapshots, PITR, **RDS Proxy** (connection pooling & 66% faster failover), and **RDS Custom**.
+    *   **Amazon Aurora:** 6-copy Storage Quorum (4/6 write, 3/6 read), Endpoints (Writer, Reader, Custom), **Aurora Serverless**, **Global Database** (<1 min RTO), Backtrack, Database Cloning, and Babelfish.
+    *   **NoSQL & Analytics DB:** Amazon DynamoDB (RCU/WCU, GSI/LSI, Streams, Global Tables) and **Amazon Redshift** (OLAP, Redshift Spectrum).
+    *   **In-Memory Caching:** **Amazon ElastiCache (Redis vs. Memcached)** — *Lazy Loading*, *Write Through*, *Session Store*, Sorted Sets — and **DynamoDB DAX**.
 
+*   **`05_networking_delivery.md` — Networking & Content Delivery**
+    *   **VPC Fundamentals:** CIDR, Subnets, Route Tables, IGW, NAT Gateway vs. NAT Instance, Egress-Only IGW, DHCP Option Sets.
+    *   **VPC Security:** Security Groups (stateful) vs. NACLs (stateless, ephemeral ports), and **VPC Endpoints** (Gateway vs. Interface / PrivateLink).
+    *   **Hybrid & Multi-VPC:** VPC Peering (non-transitive), **AWS Transit Gateway**, Site-to-Site VPN, and AWS Direct Connect (DX).
+    *   **DNS & Edge Networking:** Amazon Route 53 (routing policies, health checks), **Amazon CloudFront** (OAC, caching, Lambda@Edge), and **AWS Global Accelerator** (Anycast IPs).
+
+*   **`06_integration_analytics.md` — App Integration, Analytics & AI/ML**
+    *   **Decoupling & Messaging:** Amazon SQS (Standard, FIFO, DLQ, Visibility Timeout), SNS (fan-out pattern), Amazon MQ, and Step Functions.
+    *   **Streaming & Events:** Amazon Kinesis (Data Streams, Data Firehose) and Amazon EventBridge.
+    *   **Data Analytics:** Amazon Athena (serverless S3 SQL), AWS Glue (ETL & Data Catalog), Amazon EMR, and OpenSearch.
+    *   **AI / ML Services:** High-level exam patterns for Amazon Rekognition, Comprehend, Textract, Polly, Transcribe, SageMaker, and Bedrock.
+
+*   **`07_cheatsheet.md` — SAA-C03 Exam Strategy, Comparisons & Cost/DR**
+    *   **Keyword-to-Service Mapping:** Fast trigger-word associations for exam scenarios.
+    *   **"X vs. Y" Trade-Off Tables:** SQS vs. Kinesis, ALB vs. NLB, Redis vs. Memcached, EFS vs. FSx, DataSync vs. Storage Gateway, Global Accelerator vs. CloudFront.
+    *   **Disaster Recovery (DR):** Backup & Restore, Pilot Light, Warm Standby, and Multi-Site Active-Active (RTO vs. RPO).
+    *   **Cost Optimization Playbook:** AWS Budgets, Cost Explorer, Compute Optimizer, S3 Tiering, and compute/database cost-cutting traps.
+
+---
 
 ## 🚀 Exam Strategy & Technical Trap Log
 
-Every module includes a dedicated **"Trap Log"** section. Instead of just listing what services do, the notes focus on technical trade-offs (**X vs. Y**) and common exam pitfalls:
-*   Differentiating between similar services based on constraints (e.g., *Lowest Cost* vs. *Lowest Latency*).
-*   Understanding service limits, minimum storage durations, and retrieval fees.
-*   Identifying keyword triggers in exam scenarios (e.g., *"Highly available with immediate failover"* -> *Multi-AZ*, while *"Read heavy scaling"* -> *Read Replicas*).
-
----
+While modules `01` through `06` provide deep technical specifications per service, **`07_cheatsheet.md`** ties everything together against the 4 official SAA-C03 exam pillars (*Secure, Resilient, High-Performing, Cost-Optimized*):
+*   **Constraint-Based Elimination:** Identifying whether the prompt optimizes for *Lowest Cost*, *Lowest Latency*, *Zero Administration*, or *Minimal Code Changes*.
+*   **Service Limits & Traps:** Remembering hard constraints (e.g., *ElastiCache requires code changes*, *unencrypted RDS cannot be encrypted in place*, *VPC Peering is non-transitive*).
