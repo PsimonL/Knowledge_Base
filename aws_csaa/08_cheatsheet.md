@@ -106,6 +106,19 @@
 
 ## 05. Networking
 
+### Route 53
+
+- **Root domain (`example.com`) → AWS resource** → **Alias**, never CNAME (free, tracks IP, type A/AAAA).
+- **Alias to a single EC2** → **not possible** → **A record (Elastic IP)**, or CNAME for a subdomain only.
+- **Domain at GoDaddy, DNS in Route 53** → **Public Hosted Zone** + replace **NS** at the registrar. No transfer, never Private.
+- **Lowest latency for users** → **Latency-based**. **Legal / country borders** → **Geolocation** (+ Default record). **Shift traffic with Bias** → **Geoproximity**.
+- **Canary / A/B (e.g. 5%)** → **Weighted**. **Active-Passive DR** → **Failover**.
+- **Simple DNS balancing with health checks** → **Multi-Value Answer** (max 8).
+- **Health check on private VPC resource** → **CloudWatch Alarm**.
+- **On-prem → AWS DNS** → **Inbound Endpoint**. **AWS → on-prem DNS** → **Outbound Endpoint**.
+- **Migration with high TTL** → lower TTL (e.g. 60 s) → wait the old TTL → change record → raise TTL back.
+- **100% SLA** → **Route 53**.
+
 ---
 
 ## 06. Integrations
