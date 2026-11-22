@@ -78,6 +78,30 @@
 - Dev/test shared storage on a budget → **EFS One Zone**. Cold files in EFS → **EFS-IA** via Lifecycle Management.
 - Big data / parallel workloads on EFS → **Max I/O** performance mode.
 
+### S3: Basics & Permissions
+- Max object **5 TB**. File **> 5 GB** → **Multi-part upload**.
+- **EC2 app needs S3 access** → **IAM Role** on the instance.
+- **Cross-account or public access** → **Bucket Policy**.
+- **Force encryption on upload** → **Bucket Policy**.
+- **403 on static website** → missing public **`s3:GetObject`** policy or **Block Public Access** on.
+
+### S3: Versioning & Replication
+- Replication needs **versioning on both buckets**, copies **only new objects** (old ones → **Batch Replication**).
+- **No chaining** (A → B → C does not reach C).
+- **Permanent delete (VersionId) is never replicated.**
+- **Compliance / low latency abroad** → **CRR**. **Log aggregation / prod-test sync** → **SRR**.
+- Stop paying for old versions → **Lifecycle: delete noncurrent versions**.
+
+### S3: Storage Classes
+- **All classes = 11 nines durability** (even One Zone-IA and Glacier). One Zone classes lose data only if the **whole AZ is destroyed**.
+- **Unknown / changing access pattern** → **Intelligent-Tiering**.
+- **Infrequent, but needed in ms** → **Standard-IA** (monthly) or **Glacier Instant Retrieval** (quarterly).
+- **Re-creatable data / secondary backup, lowest cost** → **One Zone-IA**.
+- **Archive, sometimes restore in 1-5 min or bulk for free** → **Glacier Flexible Retrieval**.
+- **Cheapest multi-year archive (compliance), 12-48 h is fine** → **Glacier Deep Archive**.
+- **Single-digit ms, millions of req/s, same AZ as EC2 / SageMaker** → **Express One Zone** (Directory Bucket).
+- **Cost trap:** small files (< 128 KB) in IA / Glacier IR are **billed as 128 KB**. Deleting from Deep Archive **before 180 days** still charges the full 180 days.
+
 ---
 
 ## 04. Databases
